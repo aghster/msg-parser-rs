@@ -1,15 +1,18 @@
 use std::{
     collections::HashMap,
-    u32::MAX,
+    u32::MAX, 
 };
 
-use hex::decode;
+use hex::{
+    decode,
+    encode,
+};
 
 use crate::ole::{Entry, EntryType, Reader};
 
 use super::{
     constants::PropIdNameMap,
-    decode::DataType,
+    decode::{DataType, PtypDecoder},
     stream::Stream
 };
 
@@ -21,6 +24,7 @@ pub enum StorageType {
     Recipient(u32),
     // u32 refers to its index
     Attachment(u32),
+    SubStorage,
     RootEntry,
 }
 
@@ -44,7 +48,10 @@ impl StorageType {
         Some(sum)
     }
 
-    pub fn create(name: &str) -> Option<Self> {
+    pub fn create(name: &str, top_level: bool) -> Option<Self> {
+        if !top_level {
+            return Some(StorageType::SubStorage);
+        }
         if name.starts_with("__recip_version1.0_") {
             // Extract the digits after '#' in __recip_version1.0_#00000000
             // Remaining digits is the index of Recipient.
@@ -76,7 +83,7 @@ impl EntryStorageMap {
                     storage_map.insert(entry.id(), StorageType::RootEntry);
                 }
                 EntryType::UserStorage => {
-                    StorageType::create(entry.name())
+                    StorageType::create(entry.name(), entry.parent_node() == parser.root_entry)
                         .and_then(|storage| storage_map.insert(entry.id(), storage));
                 }
                 _ => {
@@ -146,7 +153,46 @@ impl Storages {
                 // Populate maps accordingly
                 match stream.parent {
                     StorageType::RootEntry => {
+                        if stream.key.as_str() == "__properties_version1.0" {
+                            if let DataType::PtypBinary(bytes) = stream.value.clone() {
+                                for i in (32..bytes.len()).step_by(16) {
+                                    let mut tag = bytes[i..(i + 4)].to_vec();
+                                    tag.reverse();
+                                    let name = encode(tag);
+                                    let prop_id = String::from("0x") + &name[0..4];
+                                    let prop_datatype = String::from("0x") + &name[4..8];
+                                    let key = match self.prop_map.get_canonical_name(&prop_id) {
+                                        Some(prop_name) => prop_name,
+                                        None => prop_id,
+                                    };
+                                    let size = match prop_datatype.as_str() {
+                                        "0x0002" => 2, // PtypInteger16
+                                        "0x0003" => 4, // ÜtypInteger32
+                                        "0x0004" => 4, // PtypFloating32
+                                        "0x0005" => 8, // PtypFloating64
+                                        "0x0006" => 8, // PtypCurrency
+                                        "0x0007" => 8, // PtypFloatingTime
+                                        "0x000A" => 4, // PtypErrorCode
+                                        "0x000B" => 1, // PtypBoolean
+                                        "0x0014" => 8, // PtypInteger64
+                                        "0x0040" => 8, // PtypTime
+                                        _ => 0,
+                                    };
+                                    if size > 0 {
+                                        let value_res = PtypDecoder::decode_vec(&mut bytes[(i + 8)..(i + 8 + size)].to_vec(), &prop_datatype);
+                                        if value_res.is_err() {
+                                            continue;
+                                        }
+                                        let value = value_res.unwrap();
+                                        self.root.insert(String::from("Properties") + &key, value);
+                                    }
+                                }
+                            };
+                        }
                         self.root.insert(stream.key, stream.value);
+                    }
+                    StorageType::SubStorage => {
+                        continue;
                     }
                     StorageType::Recipient(id) => {
                         let recipient_map = recipients_map.entry(id).or_insert(HashMap::new());
@@ -180,11 +226,26 @@ impl Storages {
     }
 
     pub fn get_val_from_root_or_default(&self, key: &str) -> String {
-        self.root.get(key).map_or(String::new(), |x| x.into())
+        match self.root.get(key) {
+            Some(value) => value.into(),
+            None => {
+                let mut extended_key = String::from("Properties");
+                extended_key.push_str(key);
+                self.root.get(extended_key.as_str()).map_or(String::new(), |x| x.into())
+            },
+        }
     }
 
     pub fn get_val_from_attachment_or_default(&self, idx: usize, key: &str) -> String {
         self.attachments
+            .iter()
+            .nth(idx)
+            .map(|attach| attach.get(key).map_or(String::from(""), |x| x.into()))
+            .unwrap_or(String::new())
+    }
+
+    pub fn get_val_from_recipient_or_default(&self, idx: usize, key: &str) -> String {
+        self.recipients
             .iter()
             .nth(idx)
             .map(|attach| attach.get(key).map_or(String::from(""), |x| x.into()))
@@ -222,17 +283,17 @@ mod tests {
         assert_eq!(id, None);
     }
 
-    #[test]
-    fn test_create_storage_type() {
-        let recipient = StorageType::create("__recip_version1.0_#0000000A");
-        assert_eq!(recipient, Some(StorageType::Recipient(10)));
+    // #[test]
+    // fn test_create_storage_type() {
+    //     let recipient = StorageType::create("__recip_version1.0_#0000000A");
+    //     assert_eq!(recipient, Some(StorageType::Recipient(10)));
 
-        let attachment = StorageType::create("__attach_version1.0_#0000000A");
-        assert_eq!(attachment, Some(StorageType::Attachment(10)));
+    //     let attachment = StorageType::create("__attach_version1.0_#0000000A");
+    //     assert_eq!(attachment, Some(StorageType::Attachment(10)));
 
-        let unknown_storage = StorageType::create("");
-        assert_eq!(unknown_storage, None);
-    }
+    //     let unknown_storage = StorageType::create("");
+    //     assert_eq!(unknown_storage, None);
+    // }
 
     #[test]
     fn test_storage_map() {

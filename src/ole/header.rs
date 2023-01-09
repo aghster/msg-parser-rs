@@ -130,8 +130,9 @@ impl<'ole> super::ole::Reader<'ole> {
       let mut sec_id = usize::from_slice(&header[68..72]);
       let mut buffer = vec![0u8; 0];
 
-
+      let mut sec_ids = Vec::<usize>::new();
       while sec_id != super::constants::END_OF_CHAIN_SECID_U32 as usize {
+        sec_ids.push(sec_id);
         let relative_offset = sec_id * sec_size;
 
         // check if we need to read more data
@@ -144,6 +145,9 @@ impl<'ole> super::ole::Reader<'ole> {
         total_sec_id_read += self.read_sec_ids(&buffer[relative_offset
           .. relative_offset + sec_size - 4], total_sec_id_read);
         sec_id = usize::from_slice(&buffer[buffer.len() - 4 ..]);
+        if sec_ids.contains(&sec_id){
+          return Err(super::error::Error::InvalidOLEFile)
+        }
       }
         // save the buffer for later usage
         self.body = Some(buffer);

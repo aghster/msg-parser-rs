@@ -6,6 +6,13 @@ use super::{
     storage::StorageType,
 };
 
+// StreamType
+#[derive(Debug, Clone, PartialEq)]
+pub enum StreamType {
+    SubStorage,
+    PropertyStream,
+}
+
 // Stream refer to an element in Message object.
 #[derive(Debug, PartialEq)]
 pub struct Stream {
@@ -13,6 +20,7 @@ pub struct Stream {
     pub parent: StorageType,
     pub key: String,
     pub value: DataType,
+    pub _type: StreamType,
 }
 
 impl Stream {
@@ -27,8 +35,12 @@ impl Stream {
         return (prop_id, prop_datatype);
     }
 
-    fn is_stream(name: &str) -> bool {
-        return name.starts_with("__substg1.0");
+    fn stream_type(name: &str) -> Option<StreamType> {
+        match name {
+            "__properties_version1.0" => Some(StreamType::PropertyStream),
+            _ if name.starts_with("__substg1.0") => Some(StreamType::SubStorage),
+            _ => None,
+        }
     }
 
     pub fn create(
@@ -37,22 +49,38 @@ impl Stream {
         prop_map: &PropIdNameMap,
         parent: &StorageType,
     ) -> Option<Self> {
-        if !Self::is_stream(name) {
-            return None;
+        match Self::stream_type(name) {
+            Some(StreamType::SubStorage) => {
+                // Split name up into property id and datatype
+                let (prop_id, prop_datatype) = Self::extract_id_and_datatype(name);
+                let key = prop_map.get_canonical_name(&prop_id)?;
+                let value_res = PtypDecoder::decode(entry_slice, &prop_datatype);
+                if value_res.is_err() {
+                    return None;
+                }
+                let value = value_res.unwrap();
+                return Some(Self {
+                    parent: parent.clone(),
+                    key,
+                    value,
+                    _type: StreamType::SubStorage,
+                })
+            },
+            Some(StreamType::PropertyStream) => {
+                let value_res = PtypDecoder::decode(entry_slice, "0x0102");
+                if value_res.is_err() {
+                    return None;
+                }
+                let value = value_res.unwrap();
+                return Some(Self {
+                    parent: parent.clone(),
+                    key: String::from(name),
+                    value,
+                    _type: StreamType::PropertyStream,
+                })
+            }
+            _ => None,
         }
-        // Split name up into property id and datatype
-        let (prop_id, prop_datatype) = Self::extract_id_and_datatype(name);
-        let key = prop_map.get_canonical_name(&prop_id)?;
-        let value_res = PtypDecoder::decode(entry_slice, &prop_datatype);
-        if value_res.is_err() {
-            return None;
-        }
-        let value = value_res.unwrap();
-        Some(Self {
-            parent: parent.clone(),
-            key,
-            value,
-        })
     }
 }
 
@@ -60,7 +88,7 @@ impl Stream {
 mod tests {
     use super::{
         super::constants::PropIdNameMap, super::decode::DataType, super::storage::StorageType,
-        Stream,
+        Stream, StreamType,
     };
     use crate::ole::Reader;
 
@@ -76,9 +104,10 @@ mod tests {
     }
 
     #[test]
-    fn test_is_stream() {
-        assert_eq!(Stream::is_stream("__recip_version1.0_#00000000"), false);
-        assert_eq!(Stream::is_stream("__substg1.0_3701000D"), true);
+    fn test_stream_type() {
+        assert_eq!(Stream::stream_type("__recip_version1.0_#00000000"), None);
+        assert_eq!(Stream::stream_type("__substg1.0_3701000D"), Some(StreamType::SubStorage));
+        assert_eq!(Stream::stream_type("__properties_version1.0"), Some(StreamType::PropertyStream));
     }
 
     #[test]
@@ -106,6 +135,7 @@ mod tests {
                 key: "SenderEmailAddress".to_string(),
                 value: DataType::PtypString("upgrade@asuswebstorage.com".to_string()),
                 parent: StorageType::RootEntry,
+                _type: StreamType::SubStorage,
             })
         );
 
@@ -127,7 +157,8 @@ mod tests {
             Some(Stream {
                 key: "DisplayName".to_string(),
                 value: DataType::PtypString("Sriram Govindan".to_string()),
-                parent: StorageType::Recipient(1)
+                parent: StorageType::Recipient(1),
+                _type: StreamType::SubStorage,
             })
         )
     }
@@ -154,7 +185,8 @@ mod tests {
             Some(Stream {
                 key: "AttachExtension".to_string(),
                 value: DataType::PtypString(".doc".to_string()),
-                parent: StorageType::Attachment(0)
+                parent: StorageType::Attachment(0),
+                _type: StreamType::SubStorage,
             })
         )
     }

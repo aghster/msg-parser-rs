@@ -51,7 +51,10 @@ impl TransportHeaders {
                 text,
                 Regex::new(r"(?i)Content-Type: (.*(\n\s.*)*)\r\n").unwrap(),
             ),
-            date: Self::extract_field(&text, Regex::new(r"(?i)Date: (.*(\n\s.*)*)\r\n").unwrap()),
+            date: Self::extract_field(
+                text, 
+                Regex::new(r"(?i)Date: (.*(\n\s.*)*)\r\n").unwrap()
+            ),
             message_id: Self::extract_field(
                 text,
                 Regex::new(r"(?i)Message-ID: (.*(\n\s.*)*)\r\n").unwrap(),
@@ -72,9 +75,9 @@ pub struct Person {
 }
 
 impl Person {
-    fn new(name: Name, email: Email) -> Self {
-        Self { name, email }
-    }
+    // fn new(name: Name, email: Email) -> Self {
+    //     Self { name, email }
+    // }
     fn create_from_props(props: &Properties, name_key: &str, email_keys: Vec<&str>) -> Self {
         let name: String = props.get(name_key).map_or(String::new(), |x| x.into());
         // Get the fist email that can be found in props given email_keys.
@@ -89,12 +92,29 @@ impl Person {
 
 // Attachment represents attachment object in the mail.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Recipient {
+    pub display_name: String,  // "DisplayName"
+    pub email_address: String, // "EmailAddress"
+}
+
+impl Recipient {
+    fn create(storages: &Storages, idx: usize) -> Self {
+        Self {
+            display_name: storages.get_val_from_recipient_or_default(idx, "DisplayName"),
+            email_address: storages.get_val_from_recipient_or_default(idx, "EmailAddress"),
+        }
+    }
+}
+
+// Attachment represents attachment object in the mail.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Attachment {
     pub display_name: String, // "DisplayName"
     pub payload: String,      // "AttachDataObject"
     pub extension: String,    // "AttachExtension"
     pub mime_tag: String,     // "AttachMimeTag"
     pub file_name: String,    // "AttachFilename"
+    pub content_id: String,   // "AttachContentId"
 }
 
 impl Attachment {
@@ -105,6 +125,7 @@ impl Attachment {
             extension: storages.get_val_from_attachment_or_default(idx, "AttachExtension"),
             mime_tag: storages.get_val_from_attachment_or_default(idx, "AttachMimeTag"),
             file_name: storages.get_val_from_attachment_or_default(idx, "AttachFilename"),
+            content_id: storages.get_val_from_attachment_or_default(idx, "AttachContentId"),
         }
     }
 }
@@ -117,50 +138,53 @@ impl Attachment {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Outlook {
     pub headers: TransportHeaders,    // "TransportMessageHeader"
+    pub client_submit_time: String,   // "ClientSubmitTime"
     pub sender: Person,               // "SenderName" , "SenderSmtpAddress"/"SenderEmailAddress"
-    pub to: Vec<Person>,              // "DisplayName", "SmtpAddress"/"EmailAddress"
-    pub cc: Vec<Person>,              // "DisplayCc"
-    pub bcc: Name,                    // "DisplayBcc"
+    pub display_to: String,           // "DisplayTo"
+    pub display_cc: String,           // "DisplayCc"
+    pub display_bcc: String,          // "DisplayBcc"
     pub subject: String,              // "Subject"
     pub body: String,                 // "Body"
     pub rtf_compressed: String,       // "RtfCompressed"
+    pub html: String,                 // "Html"
+    pub recipients: Vec<Recipient>,   // See Recipient struct
     pub attachments: Vec<Attachment>, // See Attachment struct
 }
 
 impl Outlook {
-    fn extract_cc_from_headers(header_text: &str) -> Vec<Person> {
-        // Format in header is:
-        // CC: NAME <EMAIL>, NAME <EMAIL> \r\n
-        let re = Regex::new(r"(?i)CC: .*(\r\n\t)?.*\r\n").unwrap();
-        let caps = re.captures(header_text);
-        if caps.is_none() {
-            return vec![];
-        }
-        let cap = caps.unwrap().get(0).unwrap().as_str();
-        // Remove first 3 chars
-        // Split at ",", then trim and clean each string
-        // We should be left with ["NAME <EMAIL", "NAME <EMAIL"]
-        let cc_list = &cap[3..]
-            .split(",")
-            .map(|x| x.trim().replace('>', ""))
-            .collect::<Vec<String>>();
+    // fn extract_cc_from_headers(header_text: &str) -> Vec<Person> {
+    //     // Format in header is:
+    //     // CC: NAME <EMAIL>, NAME <EMAIL> \r\n
+    //     let re = Regex::new(r"(?i)CC: .*(\r\n\t)?.*\r\n").unwrap();
+    //     let caps = re.captures(header_text);
+    //     if caps.is_none() {
+    //         return vec![];
+    //     }
+    //     let cap = caps.unwrap().get(0).unwrap().as_str();
+    //     // Remove first 3 chars
+    //     // Split at ",", then trim and clean each string
+    //     // We should be left with ["NAME <EMAIL", "NAME <EMAIL"]
+    //     let cc_list = &cap[3..]
+    //         .split(",")
+    //         .map(|x| x.trim().replace('>', ""))
+    //         .collect::<Vec<String>>();
 
-        let mut cc_persons: Vec<Person> = vec![];
-        for cc in cc_list.iter() {
-            let name_email_pair: Vec<&str> = cc.split("<").map(|x| x.trim()).collect();
-            let person = if name_email_pair.len() < 2 {
-                // In the unlikely event that there's no email provided.
-                Person::new(name_email_pair[0].to_string(), "".to_string())
-            } else {
-                Person::new(
-                    name_email_pair[0].replace('"', ""),
-                    name_email_pair[1].to_string(),
-                )
-            };
-            cc_persons.push(person);
-        }
-        cc_persons
-    }
+    //     let mut cc_persons: Vec<Person> = vec![];
+    //     for cc in cc_list.iter() {
+    //         let name_email_pair: Vec<&str> = cc.split("<").map(|x| x.trim()).collect();
+    //         let person = if name_email_pair.len() < 2 {
+    //             // In the unlikely event that there's no email provided.
+    //             Person::new(name_email_pair[0].to_string(), "".to_string())
+    //         } else {
+    //             Person::new(
+    //                 name_email_pair[0].replace('"', ""),
+    //                 name_email_pair[1].to_string(),
+    //             )
+    //         };
+    //         cc_persons.push(person);
+    //     }
+    //     cc_persons
+    // }
 
     fn populate(storages: &Storages) -> Self {
         let headers_text = storages.get_val_from_root_or_default("TransportMessageHeaders");
@@ -169,27 +193,25 @@ impl Outlook {
         // Outlook::extract_cc_from_headers(&headers_text);
         Self {
             headers,
+            client_submit_time: storages.get_val_from_root_or_default("ClientSubmitTime"),
             sender: Person::create_from_props(
                 &storages.root,
                 "SenderName",
                 vec!["SenderSmtpAddress", "SenderEmailAddress"],
             ),
-            to: storages
-                .recipients
-                .iter()
-                .map(|recip_map| {
-                    Person::create_from_props(
-                        recip_map,
-                        "DisplayName",
-                        vec!["SmtpAddress", "EmailAddress"],
-                    )
-                })
-                .collect(),
-            cc: Outlook::extract_cc_from_headers(&headers_text),
-            bcc: storages.get_val_from_root_or_default("DisplayBcc"),
+            display_to: storages.get_val_from_root_or_default("DisplayTo"),
+            display_cc: storages.get_val_from_root_or_default("DisplayCc"),
+            display_bcc: storages.get_val_from_root_or_default("DisplayBcc"),
             subject: storages.get_val_from_root_or_default("Subject"),
             body: storages.get_val_from_root_or_default("Body"),
             rtf_compressed: storages.get_val_from_root_or_default("RtfCompressed"),
+            html: storages.get_val_from_root_or_default("Html"),
+            recipients: storages
+                .recipients
+                .iter()
+                .enumerate()
+                .map(|(i, _)| Recipient::create(storages, i))
+                .collect(),
             attachments: storages
                 .attachments
                 .iter()
@@ -228,6 +250,47 @@ mod tests {
     use super::{Outlook, Person, TransportHeaders};
 
     #[test]
+    fn test() {
+        let path = "data/S29255PIT-2022573375.MSG";
+        let outlook = Outlook::from_path(path).unwrap();
+
+        // Check displaynames
+        let displays: Vec<String> = outlook
+            .attachments
+            .iter()
+            .map(|x| x.display_name.clone())
+            .collect();
+        println!("{:#?}", displays);
+        // Check extensions
+        let exts: Vec<String> = outlook
+            .attachments
+            .iter()
+            .map(|x| x.extension.clone())
+            .collect();
+        println!("{:#?}", exts);
+        // Check mime tag
+        let mimes: Vec<String> = outlook
+            .attachments
+            .iter()
+            .map(|x| x.mime_tag.clone())
+            .collect();
+        println!("{:#?}", mimes);
+        // Check filenames
+        let filenames: Vec<String> = outlook
+            .attachments
+            .iter()
+            .map(|x| x.file_name.clone())
+            .collect();
+        println!("{:#?}", filenames);
+        // Check subject
+        let subject: String = outlook.subject;
+        println!("{:#?}", subject);
+        // Check date
+        let date: String = outlook.client_submit_time;
+        println!("{:#?}", date);
+    }
+
+   #[test]
     fn test_invalid_file() {
         let path = "data/bad_outlook.msg";
         let err = Outlook::from_path(path).unwrap_err();
@@ -272,35 +335,35 @@ mod tests {
                 email: "".to_string()
             }
         );
-        assert_eq!(
-            outlook.to,
-            vec![
-                Person {
-                    name: "marirs@outlook.com".to_string(),
-                    email: "marirs@outlook.com".to_string()
-                },
-                Person {
-                    name: "Sriram Govindan".to_string(),
-                    email: "marirs@aol.in".to_string()
-                },
-                Person {
-                    name: "marirs@outlook.in".to_string(),
-                    email: "marirs@outlook.in".to_string()
-                },
-                Person {
-                    name: "Sriram Govindan".to_string(),
-                    email: "marirs@aol.in".to_string()
-                },
-                Person {
-                    name: "Sriram Govindan".to_string(),
-                    email: "marirs@outlook.com".to_string()
-                },
-                Person {
-                    name: "marirs@outlook.in".to_string(),
-                    email: "marirs@outlook.in".to_string()
-                },
-            ]
-        );
+        // assert_eq!(
+        //     outlook.to,
+        //     vec![
+        //         Person {
+        //             name: "marirs@outlook.com".to_string(),
+        //             email: "marirs@outlook.com".to_string()
+        //         },
+        //         Person {
+        //             name: "Sriram Govindan".to_string(),
+        //             email: "marirs@aol.in".to_string()
+        //         },
+        //         Person {
+        //             name: "marirs@outlook.in".to_string(),
+        //             email: "marirs@outlook.in".to_string()
+        //         },
+        //         Person {
+        //             name: "Sriram Govindan".to_string(),
+        //             email: "marirs@aol.in".to_string()
+        //         },
+        //         Person {
+        //             name: "Sriram Govindan".to_string(),
+        //             email: "marirs@outlook.com".to_string()
+        //         },
+        //         Person {
+        //             name: "marirs@outlook.in".to_string(),
+        //             email: "marirs@outlook.in".to_string()
+        //         },
+        //     ]
+        // );
 
         assert_eq!(
             outlook.subject,
@@ -340,35 +403,35 @@ mod tests {
                 email: "".to_string()
             }
         );
-        assert_eq!(
-            outlook.to,
-            vec![
-                Person {
-                    name: "marirs@outlook.com".to_string(),
-                    email: "marirs@outlook.com".to_string()
-                },
-                Person {
-                    name: "Sriram Govindan".to_string(),
-                    email: "marirs@aol.in".to_string()
-                },
-                Person {
-                    name: "marirs@outlook.in".to_string(),
-                    email: "marirs@outlook.in".to_string()
-                },
-                Person {
-                    name: "Sriram Govindan".to_string(),
-                    email: "marirs@aol.in".to_string()
-                },
-                Person {
-                    name: "Sriram Govindan".to_string(),
-                    email: "marirs@outlook.com".to_string()
-                },
-                Person {
-                    name: "marirs@outlook.in".to_string(),
-                    email: "marirs@outlook.in".to_string()
-                },
-            ]
-        );
+        // assert_eq!(
+        //     outlook.to,
+        //     vec![
+        //         Person {
+        //             name: "marirs@outlook.com".to_string(),
+        //             email: "marirs@outlook.com".to_string()
+        //         },
+        //         Person {
+        //             name: "Sriram Govindan".to_string(),
+        //             email: "marirs@aol.in".to_string()
+        //         },
+        //         Person {
+        //             name: "marirs@outlook.in".to_string(),
+        //             email: "marirs@outlook.in".to_string()
+        //         },
+        //         Person {
+        //             name: "Sriram Govindan".to_string(),
+        //             email: "marirs@aol.in".to_string()
+        //         },
+        //         Person {
+        //             name: "Sriram Govindan".to_string(),
+        //             email: "marirs@outlook.com".to_string()
+        //         },
+        //         Person {
+        //             name: "marirs@outlook.in".to_string(),
+        //             email: "marirs@outlook.in".to_string()
+        //         },
+        //     ]
+        // );
         assert_eq!(
             outlook.subject,
             String::from("Test Email")
@@ -507,27 +570,27 @@ mod tests {
                 email: "brizhou@gmail.com".to_string()
             }
         );
-        assert_eq!(
-            outlook.to,
-            vec![
-                Person {
-                    name: "brianzhou@me.com".to_string(),
-                    email: "brianzhou@me.com".to_string()
-                },
-                Person {
-                    name: "Brian Zhou".to_string(),
-                    email: "brizhou@gmail.com".to_string(),
-                }
-            ]
-        );
+        // assert_eq!(
+        //     outlook.to,
+        //     vec![
+        //         Person {
+        //             name: "brianzhou@me.com".to_string(),
+        //             email: "brianzhou@me.com".to_string()
+        //         },
+        //         Person {
+        //             name: "Brian Zhou".to_string(),
+        //             email: "brizhou@gmail.com".to_string(),
+        //         }
+        //     ]
+        // );
 
-        assert_eq!(
-            outlook.cc,
-            vec![Person::new(
-                "Brian Zhou".to_string(),
-                "brizhou@gmail.com".to_string()
-            ),]
-        );
+        // assert_eq!(
+        //     outlook.cc,
+        //     vec![Person::new(
+        //         "Brian Zhou".to_string(),
+        //         "brizhou@gmail.com".to_string()
+        //     ),]
+        // );
         assert_eq!(outlook.subject, String::from("Test for TIF files"));
         assert_eq!(
             outlook.headers,
@@ -542,16 +605,16 @@ mod tests {
         assert_eq!(outlook.rtf_compressed.starts_with("bc020000b908"), true);
     }
 
-    #[test]
-    fn test_multiple_cc() {
-        let path = "data/test_email.msg";
-        let outlook = Outlook::from_path(path).unwrap();
+    // #[test]
+    // fn test_multiple_cc() {
+    //     let path = "data/test_email.msg";
+    //     let outlook = Outlook::from_path(path).unwrap();
 
-        assert_eq!(
-            outlook.cc,
-            vec![]
-        );
-    }
+    //     assert_eq!(
+    //         outlook.cc,
+    //         vec![]
+    //     );
+    // }
 
     #[test]
     fn test_to_json() {

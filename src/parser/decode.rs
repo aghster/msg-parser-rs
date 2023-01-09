@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::{io::Read, convert::TryInto};
 
 use hex;
 
@@ -11,8 +11,10 @@ use super::error::{DataTypeError, Error};
 // https://docs.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcdata/0c77892e-288e-435a-9c49-be1c20c7afdb
 #[derive(Clone, Debug, PartialEq)]
 pub enum DataType {
-    PtypString(String),
     PtypBinary(Vec<u8>),
+    PtypString(String),
+    PtypString8(String),
+    PtypTime(String),
 }
 
 impl From<&DataType> for String {
@@ -20,6 +22,8 @@ impl From<&DataType> for String {
         match *data {
             DataType::PtypBinary(ref bytes) => hex::encode(bytes),
             DataType::PtypString(ref string) => string.to_string(),
+            DataType::PtypString8(ref string) => string.to_string(),
+            DataType::PtypTime(ref string) => string.to_string(),
         }
     }
 }
@@ -34,7 +38,19 @@ impl PtypDecoder {
         entry_slice.read(&mut buff)?;
         match code {
             "0x001F" => decode_ptypstring(&buff),
+            "0x001E" => decode_ptypstring8(&buff),
             "0x0102" => decode_ptypbinary(&buff),
+            "0x0040" => decode_ptyptime(&buff),
+            _ => Err(DataTypeError::UnknownCode(code.to_string()).into()),
+        }
+    }
+
+    pub fn decode_vec(buff: &mut Vec<u8>, code: &str) -> Result<DataType, Error> {
+        match code {
+            "0x001F" => decode_ptypstring(&buff),
+            "0x001E" => decode_ptypstring8(&buff),
+            "0x0102" => decode_ptypbinary(&buff),
+            "0x0040" => decode_ptyptime(&buff),
             _ => Err(DataTypeError::UnknownCode(code.to_string()).into()),
         }
     }
@@ -52,7 +68,12 @@ fn decode_ptypstring(buff: &Vec<u8>) -> Result<DataType, Error> {
     let mut buffu16 = Vec::new();
     loop {
         let c1 = match buff_iter.next() {
-            Some(c) => c,
+            Some(c) => {
+                if *c == 0_u8 {
+                    break
+                }
+                c
+            },
             None => {
                 break;
             },
@@ -68,6 +89,49 @@ fn decode_ptypstring(buff: &Vec<u8>) -> Result<DataType, Error> {
         Ok(decoded) => Ok(DataType::PtypString(decoded)),
         Err(err) => Err(DataTypeError::Utf16Err(err).into()),
     }
+}
+
+fn decode_ptypstring8(buff: &Vec<u8>) -> Result<DataType, Error> {
+    // PtypString8
+    // Use UTF-8 String decode
+    let mut buff_iter = buff.iter();
+    let mut decoded = String::new();
+    loop {
+        let ch = match buff_iter.next() {
+            Some(c) => {
+                if *c == 0_u8 {
+                    break;
+                }
+                *c as char // https://stackoverflow.com/a/28175593
+            },
+            None => {
+                break;
+            }
+        };
+        decoded.push(ch);
+    }
+    // let last_char = match buff.iter().rposition(|&c| c != 0_u8) {
+    //     Some(pos) => pos,
+    //     None => buff.len()
+    // };
+    // match String::from_utf8(buff[..(last_char + 1)].to_vec()) {
+    //     Ok(test) => { dbg!(test); () },
+    //     Err(err) => { () },
+    // };
+    // match String::from_utf8_lossy(&buff[..(last_char + 1)]) {
+    //     Cow::Borrowed(decoded) => Ok(DataType::PtypString8(decoded.to_owned())),
+    //     Cow::Owned(decoded) => Ok(DataType::PtypString8(decoded)),
+    // }
+    return Ok(DataType::PtypString8(decoded));
+}
+
+fn decode_ptyptime(buff: &Vec<u8>) -> Result<DataType, Error> {
+    // PtypTime
+    // https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/filetime
+    // 11644473599996 = DIFF_BETWEEN_EPOCHS_1970_1601
+    let bytes: [u8; 8] = buff[0..8].try_into().unwrap();
+    let milliseconds = (u64::from_le_bytes(bytes) as f64 / 10000_f64) as u64 - 11644473599996_u64;
+    Ok(DataType::PtypTime(milliseconds.to_string()))
 }
 
 #[cfg(test)]
