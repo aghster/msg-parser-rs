@@ -29,6 +29,7 @@ pub struct TransportHeaders {
     pub date: String,
     pub message_id: String,
     pub reply_to: String,
+    pub x_unsent: String,
 }
 
 impl TransportHeaders {
@@ -62,6 +63,10 @@ impl TransportHeaders {
             reply_to: Self::extract_field(
                 text,
                 Regex::new(r"(?i)Reply-To: (.*(\n\s.*)*)\r\n").unwrap(),
+            ),
+            x_unsent: Self::extract_field(
+                text,
+                Regex::new(r"(?i)X-Unsent: (.*(\n\s.*)*)\r\n").unwrap(),
             ),
         }
     }
@@ -138,6 +143,7 @@ impl Attachment {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Outlook {
     pub headers: TransportHeaders,    // "TransportMessageHeader"
+    pub message_flags: String,        // "MessageFlags"
     pub client_submit_time: String,   // "ClientSubmitTime"
     pub sender: Person,               // "SenderName" , "SenderSmtpAddress"/"SenderEmailAddress"
     pub display_to: String,           // "DisplayTo"
@@ -193,6 +199,7 @@ impl Outlook {
         // Outlook::extract_cc_from_headers(&headers_text);
         Self {
             headers,
+            message_flags: storages.get_val_from_root_or_default("MessageFlags"),
             client_submit_time: storages.get_val_from_root_or_default("ClientSubmitTime"),
             sender: Person::create_from_props(
                 &storages.root,
@@ -251,7 +258,7 @@ mod tests {
 
     #[test]
     fn test() {
-        let path = "data/S29255PIT-2022573375.MSG";
+        let path = "data/TESTPTDE-2023611543.MSG";
         let outlook = Outlook::from_path(path).unwrap();
 
         // Check displaynames
@@ -319,7 +326,8 @@ mod tests {
                 content_type: String::new(),
                 date: String::new(),
                 message_id: String::new(),
-                reply_to: String::new()
+                reply_to: String::new(),
+                x_unsent: String::new(),
             }
         );
     }
@@ -377,6 +385,7 @@ mod tests {
                 date: String::new(),
                 message_id: String::new(),
                 reply_to: String::new(),
+                x_unsent: String::new(),
             }
         );
 
@@ -599,7 +608,8 @@ mod tests {
                 date: "Mon, 18 Nov 2013 10:26:24 +0200".to_string(),
                 message_id: "<CADtJ4eNjQSkGcBtVteCiTF+YFG89+AcHxK3QZ=-Mt48xygkvdQ@mail.gmail.com>"
                     .to_string(),
-                reply_to: String::from("")
+                reply_to: String::from(""),
+                x_unsent: String::new(),
             }
         );
         assert_eq!(outlook.rtf_compressed.starts_with("bc020000b908"), true);

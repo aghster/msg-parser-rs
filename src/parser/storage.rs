@@ -158,7 +158,7 @@ impl Storages {
                                 for i in (32..bytes.len()).step_by(16) {
                                     let mut tag = bytes[i..(i + 4)].to_vec();
                                     tag.reverse();
-                                    let name = encode(tag);
+                                    let name = encode(tag).to_uppercase();
                                     let prop_id = String::from("0x") + &name[0..4];
                                     let prop_datatype = String::from("0x") + &name[4..8];
                                     let key = match self.prop_map.get_canonical_name(&prop_id) {
@@ -167,7 +167,7 @@ impl Storages {
                                     };
                                     let size = match prop_datatype.as_str() {
                                         "0x0002" => 2, // PtypInteger16
-                                        "0x0003" => 4, // ÜtypInteger32
+                                        "0x0003" => 4, // PtypInteger32
                                         "0x0004" => 4, // PtypFloating32
                                         "0x0005" => 8, // PtypFloating64
                                         "0x0006" => 8, // PtypCurrency

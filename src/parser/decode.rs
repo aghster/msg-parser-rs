@@ -11,6 +11,7 @@ use super::error::{DataTypeError, Error};
 // https://docs.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcdata/0c77892e-288e-435a-9c49-be1c20c7afdb
 #[derive(Clone, Debug, PartialEq)]
 pub enum DataType {
+    PtypInteger32(i32),
     PtypBinary(Vec<u8>),
     PtypString(String),
     PtypString8(String),
@@ -20,6 +21,7 @@ pub enum DataType {
 impl From<&DataType> for String {
     fn from(data: &DataType) -> Self {
         match *data {
+            DataType::PtypInteger32(ref num) => num.to_string(),
             DataType::PtypBinary(ref bytes) => hex::encode(bytes),
             DataType::PtypString(ref string) => string.to_string(),
             DataType::PtypString8(ref string) => string.to_string(),
@@ -37,6 +39,7 @@ impl PtypDecoder {
         let mut buff = vec![0u8; entry_slice.len()];
         entry_slice.read(&mut buff)?;
         match code {
+            "0x0003" => decode_ptypinteger32(&buff),
             "0x001F" => decode_ptypstring(&buff),
             "0x001E" => decode_ptypstring8(&buff),
             "0x0102" => decode_ptypbinary(&buff),
@@ -47,6 +50,7 @@ impl PtypDecoder {
 
     pub fn decode_vec(buff: &mut Vec<u8>, code: &str) -> Result<DataType, Error> {
         match code {
+            "0x0003" => decode_ptypinteger32(&buff),
             "0x001F" => decode_ptypstring(&buff),
             "0x001E" => decode_ptypstring8(&buff),
             "0x0102" => decode_ptypbinary(&buff),
@@ -54,6 +58,12 @@ impl PtypDecoder {
             _ => Err(DataTypeError::UnknownCode(code.to_string()).into()),
         }
     }
+}
+
+fn decode_ptypinteger32(buff: &Vec<u8>) -> Result<DataType, Error> {
+    let bytes: [u8; 4] = buff[0..4].try_into().unwrap();
+    let num = i32::from_le_bytes(bytes);
+    Ok(DataType::PtypInteger32(num))
 }
 
 fn decode_ptypbinary(buff: &Vec<u8>) -> Result<DataType, Error> {
